@@ -1,0 +1,17 @@
+#pragma once
+
+#include <windows.h>
+#include <initguid.h>
+
+DEFINE_GUID(CLSID_EyeCam_Video,
+            0x@GUID_VAL01@,
+            0x@GUID_VAL02@,
+            0x@GUID_VAL03@,
+            0x@GUID_VAL04@,
+            0x@GUID_VAL05@,
+            0x@GUID_VAL06@,
+            0x@GUID_VAL07@,
+            0x@GUID_VAL08@,
+            0x@GUID_VAL09@,
+            0x@GUID_VAL10@,
+            0x@GUID_VAL11@);

@@ -1,0 +1,79 @@
+@echo off
+@cd /d "%~dp0"
+goto checkAdmin
+
+:checkAdmin
+	net session >nul 2>&1
+	if %errorLevel% == 0 (
+		echo.
+	) else (
+		echo Administrative rights are required, please re-run this script as Administrator.
+		goto end
+	)
+
+:checkDLL
+	echo Checking for 32-bit EyeCam registration...
+	reg query "HKLM\SOFTWARE\Classes\WOW6432Node\CLSID\{@EYECAM_GUID@}" >nul 2>&1
+	if %errorLevel% == 0 (
+		echo 32-bit EyeCam found, skipping install...
+		echo.
+	) else (
+		echo 32-bit EyeCam not found, installing...
+		goto install32DLL
+	)
+
+:CheckDLLContinue
+	echo Checking for 64-bit EyeCam registration...
+	reg query "HKLM\SOFTWARE\Classes\CLSID\{@EYECAM_GUID@}" >nul 2>&1
+	if %errorLevel% == 0 (
+		echo 64-bit EyeCam found, skipping install...
+		echo.
+	) else (
+		echo 64-bit EyeCam not found, installing...
+		goto install64DLL
+	)
+	goto endSuccess
+
+:install32DLL
+	echo Installing 32-bit EyeCam...
+	if exist "%~dp0\eyecam32.dll" (
+		regsvr32.exe /i /s "%~dp0\eyecam32.dll"
+	) else (
+		regsvr32.exe /i /s eyecam32.dll
+	)
+	reg query "HKLM\SOFTWARE\Classes\WOW6432Node\CLSID\{@EYECAM_GUID@}" >nul 2>&1
+	if %errorLevel% == 0 (
+		echo 32-bit EyeCam successfully installed
+		echo.
+	) else (
+		echo 32-bit EyeCam installation failed
+		echo.
+		goto end
+	)
+	goto checkDLLContinue
+
+:install64DLL
+	echo Installing 64-bit EyeCam...
+	if exist "%~dp0\eyecam64.dll" (
+		regsvr32.exe /i /s "%~dp0\eyecam64.dll"
+	) else (
+		regsvr32.exe /i /s eyecam64.dll
+	)
+	reg query "HKLM\SOFTWARE\Classes\CLSID\{@EYECAM_GUID@}" >nul 2>&1
+	if %errorLevel% == 0 (
+		echo 64-bit EyeCam successfully installed
+		echo.
+		goto endSuccess
+	) else (
+		echo 64-bit EyeCam installation failed
+		echo.
+		goto end
+	)
+
+:endSuccess
+	echo EyeCam installed!
+	echo.
+
+:end
+	pause
+	exit
