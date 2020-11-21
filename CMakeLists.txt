@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.5)
 project(eyecam)
 
+set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_SOURCE_DIR}/cmake")
+find_package(LibUSB REQUIRED)
+
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 	set(_output_suffix "64")
 else()
@@ -97,6 +100,7 @@ endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/eyecam-guid.h.in ${CMAKE_CURRENT_BINARY_DIR}/eyecam-guid.h)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${LIBUSB_INCLUDE_DIR})
 
 if(MSVC)
 	add_compile_options("$<IF:$<CONFIG:Debug>,/MTd,/MT>")
@@ -104,7 +108,7 @@ endif()
 
 #include_directories(${CMAKE_SOURCE_DIR}/libobs/util)
 
-set(CMAKE_MODULE_LINKER_FLAGS "${MAKE_MODULE_LINKER_FLAGS} /ignore:4104")
+#set(CMAKE_MODULE_LINKER_FLAGS "${MAKE_MODULE_LINKER_FLAGS} /ignore:4104")
 
 add_library(eyecam MODULE
 	${dshow_SOURCES}
@@ -114,7 +118,8 @@ add_library(eyecam MODULE
 target_link_libraries(eyecam
 	winmm
 	strmiids
-	gdiplus
+	#gdiplus
+	${LIBUSB_LIBRARY}
 	)
 
 set_target_properties(eyecam
