@@ -4,26 +4,48 @@
 #include <shlobj_core.h>
 #include <strsafe.h>
 #include <inttypes.h>
+#include <libusb.h>
+#include "jpgd/jpgd.h"
+#include "jo_mpeg.h"
 
 using namespace DShow;
 
-extern const uint8_t *get_placeholder();
+extern const uint8_t *get_placeholder(size_t&len);
+
+#ifndef NDEBUG
+static void Log(const char* format, va_list args)
+{
+	char str[4096];
+	vsprintf_s(str, 4096, format, args);
+	OutputDebugStringA(str);
+	OutputDebugStringA("\n");
+}
+
+void Debug(const char* format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	Log(format, args);
+	va_end(args);
+}
+#endif
 
 /* ========================================================================= */
 
 VCamFilter::VCamFilter()
-	: OutputFilter(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY,
+	: OutputFilter(VideoFormat::MJPEG, DEFAULT_CX, DEFAULT_CY,
 		       DEFAULT_INTERVAL)
 {
 	thread_start = CreateEvent(nullptr, true, false, nullptr);
 	thread_stop = CreateEvent(nullptr, true, false, nullptr);
 
-	//AddVideoFormat(VideoFormat::I420, DEFAULT_CX, DEFAULT_CY,
-	//	       DEFAULT_INTERVAL);
-	//AddVideoFormat(VideoFormat::YUY2, DEFAULT_CX, DEFAULT_CY,
-	//	       DEFAULT_INTERVAL);
-	AddVideoFormat(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY,
-		DEFAULT_INTERVAL);
+	AddVideoFormat(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL);
+	AddVideoFormat(VideoFormat::XRGB, 640, 480, DEFAULT_INTERVAL * 2);
+
+	AddVideoFormat(VideoFormat::MJPEG, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL * 2); // 15fps
+
+	//AddVideoFormat(VideoFormat::MJPEG, 640, 480, DEFAULT_INTERVAL); // 30fps, idk, just doesn't want to
+	AddVideoFormat(VideoFormat::MJPEG, 640, 480, DEFAULT_INTERVAL * 2); // 15fps
 
 	/* ---------------------------------------- */
 
@@ -36,6 +58,16 @@ VCamFilter::~VCamFilter()
 {
 	SetEvent(thread_stop);
 	th.join();
+
+	if (usb_handle)
+	{
+		ov519_stop(user_data.dev);
+		stop_isoch(usb_ctx, usb_handle, user_data);
+		libusb_close(usb_handle);
+		libusb_exit(usb_ctx);
+		usb_handle = nullptr;
+		usb_ctx = nullptr;
+	}
 }
 
 const wchar_t *VCamFilter::FilterName() const
@@ -69,6 +101,12 @@ inline uint64_t VCamFilter::GetTime()
 	return gettime_100ns();
 }
 
+void VCamFilter::ImageReady(gspca_device* dev)
+{
+	std::lock_guard<std::mutex> lk(dev->mutex);
+	last_image = dev->image;
+}
+
 void VCamFilter::Thread()
 {
 	HANDLE h[2] = {thread_start, thread_stop};
@@ -82,63 +120,74 @@ void VCamFilter::Thread()
 	cx = GetCX();
 	cy = GetCY();
 	interval = GetInterval();
+	user_data.dev.ready_cb = std::bind(&VCamFilter::ImageReady, this, std::placeholders::_1);
 
-	//nv12_scale_init(&scaler, TARGET_FORMAT_NV12, GetCX(), GetCY(), cx, cy);
+	int result = 0;
+	user_data.dev.curr_mode = cx == 640 ? 1 : 0;
+	user_data.dev.frame_rate = int(10000000 / interval);
+	if ((result = libusb_init(&usb_ctx)) != 0)
+	{
+		Debug("libusb error: %d", result);
+	}
+	else
+	{
+		//libusb_set_debug(usb_ctx, libusb_log_level::LIBUSB_LOG_LEVEL_DEBUG);
+		//TODO multiple cams
+		//libusb_device* dev = find_device(usb_ctx, 0x054C, 0x0155);
+		usb_handle = libusb_open_device_with_vid_pid(usb_ctx, 0x054C, 0x0155);
+		if (usb_handle) {
+			libusb_reset_device(usb_handle);
+			user_data.dev.usb_handle = usb_handle;
+			ov519_init(user_data.dev);
+			start_isoch(usb_ctx, usb_handle, 0x01 | LIBUSB_ENDPOINT_IN, user_data);
+		}
+	}
 
 	while (!stopped()) {
 		Frame(filter_time);
 		sleepto_100ns(cur_time += interval);
 		filter_time += interval;
 	}
+
+	if (usb_handle)
+		ov519_deinit(user_data.dev);
 }
 
 void VCamFilter::Frame(uint64_t ts)
 {
-	uint32_t new_cx = cx;
-	uint32_t new_cy = cy;
-	uint64_t new_interval = interval;
-
-
-	//enum queue_state state = video_queue_state(vq);
-	//if (state != prev_state) {
-	//	if (state == SHARED_QUEUE_STATE_READY) {
-	//		video_queue_get_info(vq, &new_cx, &new_cy,
-	//				     &new_interval);
-	//	} else if (state == SHARED_QUEUE_STATE_STOPPING) {
-	//		video_queue_close(vq);
-	//		vq = nullptr;
-	//	}
-
-	//	prev_state = state;
-	//}
-
-	//if (state != SHARED_QUEUE_STATE_READY) {
-	//	new_cx = DEFAULT_CX;
-	//	new_cy = DEFAULT_CY;
-	//	new_interval = DEFAULT_INTERVAL;
-	//}
-
-	if (new_cx != cx || new_cy != cy || new_interval != interval) {
-		//nv12_scale_init(&scaler, TARGET_FORMAT_NV12, GetCX(), GetCY(),
-		//		new_cx, new_cy);
-
-		cx = new_cx;
-		cy = new_cy;
-		interval = new_interval;
-	}
-
-	//if (GetVideoFormat() == VideoFormat::I420)
-	//	scaler.format = TARGET_FORMAT_I420;
-	//else if (GetVideoFormat() == VideoFormat::YUY2)
-	//	scaler.format = TARGET_FORMAT_YUY2;
-	//else
-	//	scaler.format = TARGET_FORMAT_NV12;
-
 	uint8_t *ptr;
+	std::lock_guard<std::mutex> lk(user_data.dev.mutex);
 	if (LockSampleData(&ptr)) {
-		//if (state == SHARED_QUEUE_STATE_READY)
-		//	ShowOBSFrame(ptr);
-		//else
+		//Debug("Video format %d, last size %zu", GetVideoFormat(), last_image.size());
+		if (last_image.size() && GetVideoFormat() == VideoFormat::MJPEG) {
+			memcpy(ptr, last_image.data(), last_image.size());
+			//int width, height, actual_comps;
+			//unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(last_image.data(), last_image.size(), &width, &height, &actual_comps, 3);
+
+			//size_t min_width = min(width, cx);
+			//if (rgbData) {
+			//	unsigned char* mpegData = (unsigned char*)calloc(1, 320 * 240 * 2);
+			//	int mpegLen = jo_write_mpeg(mpegData, rgbData, 320, 240, JO_RGB24, JO_NONE, JO_FLIP_Y);
+			//	memcpy(ptr, mpegData, mpegLen);
+			//	free(mpegData);
+			//}
+			//free(rgbData);
+		}
+		else if (last_image.size())
+		{
+			int width, height, actual_comps;
+			unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(last_image.data(), last_image.size(), &width, &height, &actual_comps, 4);
+
+			size_t min_width = min(width, cx);
+			if (rgbData) {
+				for (int y = 0; y < height; y++)
+					//memcpy(&ptr[y * cx * 4], &rgbData [(height - y - 1) * width * 4], min_width * 4);
+					memcpy(ptr + y * cx * 4, rgbData + y * width * 4, min_width * 4);
+			}
+			free(rgbData);
+
+		}
+		else
 			ShowDefaultFrame(ptr);
 
 		UnlockSampleData(ts, ts + interval);
@@ -147,19 +196,22 @@ void VCamFilter::Frame(uint64_t ts)
 
 void VCamFilter::ShowDefaultFrame(uint8_t *ptr)
 {
-	//if (placeholder) {
-	//	nv12_do_scale(&scaler, ptr, placeholder);
-	//} else {
-		//memset(ptr, 127, GetCX() * GetCY() * 3 / 2);
-	static unsigned int y_offset = 0;
-	for (int y = 0; y < GetCY(); y++) {
-		cy = (y + y_offset) % GetCY();
-		for (int x = 0; x < GetCX(); x++) {
-			int c = (255 * y) / GetCY();
-			int* dst = (int*)&ptr[(cy * GetCX() + x) * 4];
-			*dst = (255 << 24) | (255 - c) << 16 | (c << 8) | (255 - c);
-		}
+	if (GetVideoFormat() == VideoFormat::MJPEG) {
+		size_t len = 0;
+		auto placeholder = get_placeholder(len);
+		if (placeholder)
+			memcpy(ptr, placeholder, len);
 	}
-	y_offset+=6;
-	//}
+	else if (GetVideoFormat() == VideoFormat::XRGB) {
+		static unsigned int y_offset = 0;
+		for (int y = 0; y < GetCY(); y++) {
+			cy = (y + y_offset) % GetCY();
+			for (int x = 0; x < GetCX(); x++) {
+				int c = (255 * y) / GetCY();
+				int* dst = (int*)&ptr[(cy * GetCX() + x) * 4];
+				*dst = (255 << 24) | (255 - c) << 16 | (c << 8) | (255 - c);
+			}
+		}
+		y_offset += 6;
+	}
 }

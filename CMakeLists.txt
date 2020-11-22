@@ -48,12 +48,24 @@ set(eyecam_SOURCES
 	placeholder.cpp
 	eyecam-module.cpp
 	eyecam-filter.cpp
+	usb.cpp
+	ov519.cpp
+	
+	jpgd/jpgd.cpp
+	jo_mpeg.cpp
 	#virtualcam-module.rc
 	)
 
 set(eyecam_HEADERS
+	util.hpp
 	sleepto.h
 	eyecam-filter.hpp
+	usb.hpp
+	ov519.hpp
+
+	jpgd/jpgd.h
+	jpgd/jpgd_idct.h
+	jo_mpeg.h
 	)
 
 string(REPLACE "-" ";" GUID_VALS ${EYECAM_GUID})
@@ -103,10 +115,8 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${LIBUSB_INCLUDE_DIR})
 
 if(MSVC)
-	add_compile_options("$<IF:$<CONFIG:Debug>,/MTd,/MT>")
+	add_compile_options("$<IF:$<CONFIG:Debug>,/MDd,/MD>")
 endif()
-
-#include_directories(${CMAKE_SOURCE_DIR}/libobs/util)
 
 #set(CMAKE_MODULE_LINKER_FLAGS "${MAKE_MODULE_LINKER_FLAGS} /ignore:4104")
 
@@ -114,13 +124,17 @@ add_library(eyecam MODULE
 	${dshow_SOURCES}
 	${dshow_HEADERS}
 	${eyecam_SOURCES}
-	${eyecam_HEADERS})
+	${eyecam_HEADERS}
+)
+
 target_link_libraries(eyecam
 	winmm
 	strmiids
 	#gdiplus
 	${LIBUSB_LIBRARY}
-	)
+)
+
+message("LIBUSB_LIBRARY: ${LIBUSB_LIBRARY}")
 
 set_target_properties(eyecam
 	PROPERTIES
