@@ -55,13 +55,14 @@ jobs:
     - name: Build
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      # Execute the build.  You can specify a specific target with "--target <NAME>"
-      run: cmake --build . --config $BUILD_TYPE
+      run: |
+        cmake --build . --config $BUILD_TYPE
+        cmake --install . --config $BUILD_TYPE
 
     - name: Upload artifact
       uses: actions/upload-artifact@v2
       continue-on-error: true
       with:
         name: dshow-eyetoy-${{ matrix.platform }}-${{ steps.git-vars.outputs.artifact-metadata }}
-        path: bin
+        path: build/dist
         retention-days: 30 # https://docs.github.com/en/free-pro-team@latest/actions/reference/usage-limits-billing-and-administration#artifact-and-log-retention-policy

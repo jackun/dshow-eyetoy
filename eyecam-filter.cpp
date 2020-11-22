@@ -7,6 +7,7 @@
 #include <libusb.h>
 #include "jpgd/jpgd.h"
 #include "jo_mpeg.h"
+#include "util.hpp"
 
 using namespace DShow;
 

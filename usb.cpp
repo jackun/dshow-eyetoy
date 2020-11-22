@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <libusb.h>
 #include "usb.hpp"
+#include "util.hpp"
 
 // Haiyaa
 #pragma comment(lib, "legacy_stdio_definitions.lib")
@@ -25,8 +26,6 @@ void usleep(__int64 usec)
 	WaitForSingleObject(timer, INFINITE);
 	CloseHandle(timer);
 }
-
-extern void Debug(const char* format, ...);
 
 constexpr int alt_size[] = { 0, 384, 512, 768, 896 };
 const int alt = 3;

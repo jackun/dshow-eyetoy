@@ -11,8 +11,6 @@
 #define DEFAULT_CY 240
 #define DEFAULT_INTERVAL 333333ULL
 
-void Debug(const char* format, ...);
-
 class VCamFilter : public DShow::OutputFilter {
 	std::thread th;
 
