@@ -65,7 +65,7 @@ libusb_device* find_device(libusb_context* ctx, const int vid, const int pid)
 	return found;
 }
 
-static void isoch_irq(struct libusb_transfer* t)
+static void LIBUSB_CALL isoch_irq(struct libusb_transfer* t)
 {
 	//Debug("In callback: %d, %d %d.", t->actual_length, t->num_iso_packets, t->iso_packet_desc[0].actual_length);
 
