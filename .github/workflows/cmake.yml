@@ -64,5 +64,5 @@ jobs:
       continue-on-error: true
       with:
         name: dshow-eyetoy-${{ matrix.platform }}-${{ steps.git-vars.outputs.artifact-metadata }}
-        path: build/dist
+        path: ${{runner.workspace}}/build/dist
         retention-days: 30 # https://docs.github.com/en/free-pro-team@latest/actions/reference/usage-limits-billing-and-administration#artifact-and-log-retention-policy
