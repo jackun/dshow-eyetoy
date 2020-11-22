@@ -131,6 +131,8 @@ GUID VFormatToSubType(VideoFormat format)
 WORD VFormatBits(VideoFormat format)
 {
 	switch (format) {
+	case VideoFormat::MJPEG: //idk
+		return 12;
 	/* raw formats */
 	case VideoFormat::ARGB:
 	case VideoFormat::XRGB:
