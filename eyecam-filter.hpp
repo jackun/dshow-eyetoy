@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <thread>
 #include <vector>
+#include <mutex>
 #include "dshow/output-filter.hpp"
 #include "usb.hpp"
 
@@ -12,7 +13,7 @@
 #define DEFAULT_INTERVAL 333333ULL
 
 class VCamFilter : public DShow::OutputFilter {
-	std::thread th;
+	std::thread th, waiter;
 
 	const uint8_t *placeholder;
 	uint32_t cx = DEFAULT_CX;
@@ -25,6 +26,7 @@ class VCamFilter : public DShow::OutputFilter {
 	user_data user_data;
 	libusb_context* usb_ctx = nullptr;
 	libusb_device_handle* usb_handle = nullptr;
+	std::mutex hotplug_mutex;
 
 	inline bool stopped() const
 	{
@@ -37,6 +39,7 @@ class VCamFilter : public DShow::OutputFilter {
 	void Frame(uint64_t ts);
 	void ShowDefaultFrame(uint8_t *ptr);
 	void ImageReady(gspca_device* user);
+	void WaitForDevice();
 
 protected:
 	const wchar_t *FilterName() const override;

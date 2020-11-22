@@ -62,6 +62,7 @@ VCamFilter::~VCamFilter()
 
 	if (usb_handle)
 	{
+		std::lock_guard<std::mutex> lk(hotplug_mutex);
 		ov519_stop(user_data.dev);
 		stop_isoch(usb_ctx, usb_handle, user_data);
 		libusb_close(usb_handle);
@@ -69,6 +70,8 @@ VCamFilter::~VCamFilter()
 		usb_handle = nullptr;
 		usb_ctx = nullptr;
 	}
+	if (waiter.joinable())
+		waiter.join();
 }
 
 const wchar_t *VCamFilter::FilterName() const
@@ -108,6 +111,53 @@ void VCamFilter::ImageReady(gspca_device* dev)
 	last_image = dev->image;
 }
 
+// Poor man's hotplugging
+void VCamFilter::WaitForDevice()
+{
+reopen:
+	//TODO multiple cams
+	//libusb_device* dev = find_device(usb_ctx, 0x054C, 0x0155);
+
+	libusb_device_handle* tmp = usb_handle; // if reopening don't close handle just yet so other things won't crash
+	while (!stopped()) {
+		usb_handle = libusb_open_device_with_vid_pid(usb_ctx, 0x054C, 0x0155);
+		if (usb_handle) {
+			if (tmp) {
+				libusb_close(tmp);
+			}
+			break;
+		}
+
+		Sleep(1000);
+	}
+
+	libusb_reset_device(usb_handle);
+	user_data.dev.usb_handle = usb_handle;
+	ov519_init(user_data.dev);
+	start_isoch(usb_ctx, usb_handle, 0x01 | LIBUSB_ENDPOINT_IN, user_data);
+
+	libusb_device* device = libusb_get_device(usb_handle);
+	libusb_device_handle* handle = nullptr;
+
+	while (!stopped()) {
+		// lock it
+		{
+			std::lock_guard<std::mutex> lk(hotplug_mutex);
+			if (!usb_handle)
+				break;
+			int ret = libusb_open(device, &handle);
+			if (ret) {
+				stop_isoch(usb_ctx, usb_handle, user_data);
+				ov519_deinit(user_data.dev);
+				Debug("reopening device %d", ret);
+				goto reopen;
+			}
+			libusb_close(handle);
+		}
+		Sleep(1000);
+	}
+}
+
 void VCamFilter::Thread()
 {
 	HANDLE h[2] = {thread_start, thread_stop};
@@ -133,15 +183,7 @@ void VCamFilter::Thread()
 	else
 	{
 		//libusb_set_debug(usb_ctx, libusb_log_level::LIBUSB_LOG_LEVEL_DEBUG);
-		//TODO multiple cams
-		//libusb_device* dev = find_device(usb_ctx, 0x054C, 0x0155);
-		usb_handle = libusb_open_device_with_vid_pid(usb_ctx, 0x054C, 0x0155);
-		if (usb_handle) {
-			libusb_reset_device(usb_handle);
-			user_data.dev.usb_handle = usb_handle;
-			ov519_init(user_data.dev);
-			start_isoch(usb_ctx, usb_handle, 0x01 | LIBUSB_ENDPOINT_IN, user_data);
-		}
+		waiter = std::thread([this] { WaitForDevice(); });
 	}
 
 	while (!stopped()) {
@@ -150,7 +192,7 @@ void VCamFilter::Thread()
 		filter_time += interval;
 	}
 
-	if (usb_handle)
+	if (user_data.dev.usb_handle)
 		ov519_deinit(user_data.dev);
 }
 

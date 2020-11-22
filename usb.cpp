@@ -30,8 +30,6 @@ void usleep(__int64 usec)
 constexpr int alt_size[] = { 0, 384, 512, 768, 896 };
 const int alt = 3;
 
-//#define READREGS 0
-
 libusb_device* find_device(libusb_context* ctx, const int vid, const int pid)
 {
 	// discover devices
@@ -99,7 +97,8 @@ resubmit:
 		free(user->buffer);
 		return;
 	}
-	libusb_submit_transfer(t);
+	int ret = libusb_submit_transfer(t);
+	//Debug("libusb_submit_transfer: %d", ret);
 }
 
 static std::thread event_thread;
@@ -116,7 +115,6 @@ void stop_isoch(libusb_context* ctx, libusb_device_handle* husb, user_data& user
 	user.dev.streaming = 0;
 	if (event_thread.joinable())
 		event_thread.join();
-
 }
 
 void start_isoch(libusb_context* ctx, libusb_device_handle* husb, int devep, user_data& user)
