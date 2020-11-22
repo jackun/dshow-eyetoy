@@ -1,0 +1,67 @@
+name: CMake
+
+on: [push]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    strategy:
+      # Prevent one build from failing everything (although maybe those should be included as experimental builds instead)
+      fail-fast: false
+      matrix:
+        os: [windows-2019]
+        platform: [Win32, x64]
+
+    name: ${{ matrix.os }}-${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v2
+#    - uses: edgarrc/action-7z@v1.0.4
+#      with:
+#        args: 7z x -o./build/ ../*.7z
+    - name: Prepare Artifact Git Info
+      shell: bash
+      run: |
+        echo "##[set-output name=branch;]${GITHUB_REF#refs/heads/}"
+        ARTIFACT_NAME="commit-$(git rev-parse --short "$GITHUB_SHA")"
+        if [ ${{ github.event_name == 'pull_request' }} ]; then
+          echo "##[set-output name=short-sha;]$(git rev-parse --short "${{ github.event.pull_request.head.sha }}")"
+          if [ ! -z "${{ github.event.pull_request.number }}" ]; then
+            ARTIFACT_NAME="pr-${{ github.event.pull_request.number }}-commit-$(git rev-parse --short "${{ github.event.pull_request.head.sha }}")"
+          fi
+        else
+          echo "##[set-output name=short-sha;]$(git rev-parse --short "$GITHUB_SHA")"
+        fi
+        echo "##[set-output name=artifact-metadata;]${ARTIFACT_NAME}"
+      id: git-vars
+    - name: Create Build Environment
+      # Some projects don't allow in-source building, so create a separate build directory
+      # We'll use this as our working directory for all subsequent commands
+      run: cmake -E make_directory ${{runner.workspace}}/build
+
+    - name: Configure CMake
+      # Use a bash shell so we can use the same syntax for environment variable
+      # access regardless of the host operating system
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      # Note the current convention is to use the -S and -B options here to specify source 
+      # and build directories, but this is only available with CMake 3.13 and higher.  
+      # The CMake binaries on the Github Actions machines are (as of this writing) 3.12
+      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+    - name: Build
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      # Execute the build.  You can specify a specific target with "--target <NAME>"
+      run: cmake --build . --config $BUILD_TYPE
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      continue-on-error: true
+      with:
+        name: dshow-eyetoy-${{ matrix.platform }}-${{ steps.git-vars.outputs.artifact-metadata }}
+        path: bin
+        retention-days: 30 # https://docs.github.com/en/free-pro-team@latest/actions/reference/usage-limits-billing-and-administration#artifact-and-log-retention-policy
