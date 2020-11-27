@@ -224,7 +224,7 @@ void gspca_frame_add(struct gspca_device* gspca_dev,
 #endif
 
 		gspca_dev->sequence++;
-		Debug("frame complete len:%d", gspca_dev->image.size());
+		//Debug("frame complete len:%d", gspca_dev->image.size());
 		gspca_dev->ready_cb(gspca_dev);
 		gspca_dev->image.resize(0);
 	}
@@ -299,9 +299,9 @@ static void ov519_mode_init_regs(struct gspca_device& gspca_dev)
 	reg_w(sd, OV519_R11_V_SIZE, gspca_dev.pixfmt.height >> 3);
 
 	// FIXME OBS decodes normally, jpgd flips UV and vice versa :confused_as_fuck:
-	/*if (gspca_dev.cam_mode[gspca_dev.curr_mode].priv)
+	if (gspca_dev.cam_mode[gspca_dev.curr_mode].priv) // removes horizontal bars in 15fps
 		reg_w(sd, OV519_R12_X_OFFSETL, 0x01);
-	else*/
+	else
 		reg_w(sd, OV519_R12_X_OFFSETL, 0x00);
 
 	reg_w(sd, OV519_R13_X_OFFSETH, 0x00);
@@ -473,11 +473,11 @@ void ov519_deinit(gspca_device& dev)
 int ov519_init(struct gspca_device& gspca_dev)
 {
 	ov519_stop(gspca_dev);
+	ov519_deinit(gspca_dev);
 
 	if (!gspca_dev.frame_rate)
 		gspca_dev.frame_rate = 30;
 
-	gspca_dev.blink = true;
 	gspca_dev.cam_mode = ov519_vga_mode;
 	//gspca_dev.curr_mode = 1;
 	gspca_dev.pixfmt = gspca_dev.cam_mode[gspca_dev.curr_mode];
@@ -487,6 +487,7 @@ int ov519_init(struct gspca_device& gspca_dev)
 	mode_init_ov_sensor_regs(gspca_dev);
 	ov519_restart(gspca_dev);
 
+	gspca_dev.blink = true;
 	blinker_thread = std::thread(blinker, &gspca_dev);
 
 	return 0;

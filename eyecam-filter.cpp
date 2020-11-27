@@ -8,6 +8,7 @@
 #include "jpgd/jpgd.h"
 #include "jo_mpeg.h"
 #include "util.hpp"
+#include <algorithm>
 
 using namespace DShow;
 
@@ -40,19 +41,24 @@ VCamFilter::VCamFilter()
 	thread_start = CreateEvent(nullptr, true, false, nullptr);
 	thread_stop = CreateEvent(nullptr, true, false, nullptr);
 
-	AddVideoFormat(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL);
-	AddVideoFormat(VideoFormat::XRGB, 640, 480, DEFAULT_INTERVAL * 2);
-
 	AddVideoFormat(VideoFormat::MJPEG, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL * 2); // 15fps
-
-	//AddVideoFormat(VideoFormat::MJPEG, 640, 480, DEFAULT_INTERVAL); // 30fps, idk, just doesn't want to
+	AddVideoFormat(VideoFormat::MJPEG, 640, 480, DEFAULT_INTERVAL); // 30fps, idk, just doesn't want to
 	AddVideoFormat(VideoFormat::MJPEG, 640, 480, DEFAULT_INTERVAL * 2); // 15fps
+
+	// too slow
+	//AddVideoFormat(VideoFormat::YUY2, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL);
+	//AddVideoFormat(VideoFormat::YUY2, DEFAULT_CX * 2 , DEFAULT_CY * 2, DEFAULT_INTERVAL);
+	//AddVideoFormat(VideoFormat::YUY2, DEFAULT_CX * 2, DEFAULT_CY * 2, DEFAULT_INTERVAL * 2);
+
+	AddVideoFormat(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL);
+	AddVideoFormat(VideoFormat::XRGB, DEFAULT_CX, DEFAULT_CY, DEFAULT_INTERVAL * 2);
+	AddVideoFormat(VideoFormat::XRGB, 640, 480, DEFAULT_INTERVAL * 2);
 
 	/* ---------------------------------------- */
 
 	th = std::thread([this] { Thread(); });
 
-	AddRef();
+	OutputFilter::AddRef();
 }
 
 VCamFilter::~VCamFilter()
@@ -64,6 +70,7 @@ VCamFilter::~VCamFilter()
 	{
 		std::lock_guard<std::mutex> lk(hotplug_mutex);
 		ov519_stop(user_data.dev);
+		ov519_deinit(user_data.dev);
 		stop_isoch(usb_ctx, usb_handle, user_data);
 		libusb_close(usb_handle);
 		libusb_exit(usb_ctx);
@@ -120,26 +127,36 @@ reopen:
 
 	libusb_device_handle* tmp = usb_handle; // if reopening don't close handle just yet so other things won't crash
 	while (!stopped()) {
-		usb_handle = libusb_open_device_with_vid_pid(usb_ctx, 0x054C, 0x0155);
-		if (usb_handle) {
-			if (tmp) {
-				libusb_close(tmp);
+		{
+			std::lock_guard<std::mutex> lk(hotplug_mutex);
+			usb_handle = libusb_open_device_with_vid_pid(usb_ctx, 0x054C, 0x0155);
+			if (usb_handle) {
+				if (tmp) {
+					libusb_close(tmp);
+				}
+				user_data.dev.usb_handle = usb_handle;
+				break;
 			}
-			break;
 		}
 
 		Sleep(1000);
 	}
 
-	libusb_reset_device(usb_handle);
-	user_data.dev.usb_handle = usb_handle;
-	ov519_init(user_data.dev);
-	start_isoch(usb_ctx, usb_handle, 0x01 | LIBUSB_ENDPOINT_IN, user_data);
+	if (stopped())
+		return;
 
-	libusb_device* device = libusb_get_device(usb_handle);
+	libusb_device* device = nullptr;
 	libusb_device_handle* handle = nullptr;
 
-	while (!stopped()) {
+	{
+		std::lock_guard<std::mutex> lk(hotplug_mutex);
+
+		libusb_reset_device(usb_handle);
+		ov519_init(user_data.dev);
+		start_isoch(usb_ctx, usb_handle, 0x01 | LIBUSB_ENDPOINT_IN, user_data);
+	}
+
+	while (!stopped() && device) {
 		// lock it
 		{
 			std::lock_guard<std::mutex> lk(hotplug_mutex);
@@ -196,39 +213,68 @@ void VCamFilter::Thread()
 		ov519_deinit(user_data.dev);
 }
 
+void YUVfromRGB(double& Y, double& U, double& V, const double R, const double G, const double B)
+{
+	Y = 0.257 * R + 0.504 * G + 0.098 * B + 16;
+	U = -0.148 * R - 0.291 * G + 0.439 * B + 128;
+	V = 0.439 * R - 0.368 * G - 0.071 * B + 128;
+}
+
 void VCamFilter::Frame(uint64_t ts)
 {
 	uint8_t *ptr;
-	std::lock_guard<std::mutex> lk(user_data.dev.mutex);
+	std::vector<uint8_t> image;
+	{
+		std::lock_guard<std::mutex> lk(user_data.dev.mutex);
+		image = last_image;
+	}
+
+	//Debug("Current mode: %d, %dx%d", GetVideoFormat(), GetCX(), GetCY());
+
 	if (LockSampleData(&ptr)) {
 		//Debug("Video format %d, last size %zu", GetVideoFormat(), last_image.size());
-		if (last_image.size() && GetVideoFormat() == VideoFormat::MJPEG) {
-			memcpy(ptr, last_image.data(), last_image.size());
-			//int width, height, actual_comps;
-			//unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(last_image.data(), last_image.size(), &width, &height, &actual_comps, 3);
-
-			//size_t min_width = min(width, cx);
-			//if (rgbData) {
-			//	unsigned char* mpegData = (unsigned char*)calloc(1, 320 * 240 * 2);
-			//	int mpegLen = jo_write_mpeg(mpegData, rgbData, 320, 240, JO_RGB24, JO_NONE, JO_FLIP_Y);
-			//	memcpy(ptr, mpegData, mpegLen);
-			//	free(mpegData);
-			//}
-			//free(rgbData);
+		if (image.size() && GetVideoFormat() == VideoFormat::MJPEG) {
+			memcpy(ptr, image.data(), image.size());
 		}
-		else if (last_image.size())
+		else if (image.size() && GetVideoFormat() == VideoFormat::YUY2)
 		{
 			int width, height, actual_comps;
-			unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(last_image.data(), last_image.size(), &width, &height, &actual_comps, 4);
+			unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(image.data(), image.size(), &width, &height, &actual_comps, 4);
+			uint8_t* yuy2 = ptr;
+			size_t min_width = min(width, cx);
+			if (rgbData) {
+				for (int y = 0; y < height; y++)
+				{
+					uint8_t* rgb = rgbData + y * width * 4;
+					for (int x = 0; x < min_width; x+=2)
+					{
+						double y0, u0, v0, y1, u1, v1;
+						YUVfromRGB(y0, u0, v0, rgb[0], rgb[1], rgb[2]);
+						YUVfromRGB(y1, u1, v1, rgb[4], rgb[5], rgb[6]);
+						yuy2[0] = (uint8_t)std::clamp(y0, 0., 255.);
+						yuy2[1] = (uint8_t)std::clamp((u0 + u1) / 2, 0., 255.);
+						yuy2[2] = (uint8_t)std::clamp(y1, 0., 255.);
+						yuy2[3] = (uint8_t)std::clamp((v0 + v1) / 2, 0., 255.);
+						rgb += 8;
+						yuy2 += 4;
+					}
+				}
+			}
+			free(rgbData);
+			//Debug("yuy2 frame");
+		}
+		else if (image.size() && GetVideoFormat() == VideoFormat::XRGB)
+		{
+			int width, height, actual_comps;
+			unsigned char* rgbData = jpgd::decompress_jpeg_image_from_memory(image.data(), image.size(), &width, &height, &actual_comps, 4);
 
 			size_t min_width = min(width, cx);
 			if (rgbData) {
 				for (int y = 0; y < height; y++)
-					//memcpy(&ptr[y * cx * 4], &rgbData [(height - y - 1) * width * 4], min_width * 4);
-					memcpy(ptr + y * cx * 4, rgbData + y * width * 4, min_width * 4);
+					memcpy(&ptr[y * cx * 4], &rgbData [(height - y - 1) * width * 4], min_width * 4);
+					//memcpy(ptr + y * cx * 4, rgbData + y * width * 4, min_width * 4);
 			}
 			free(rgbData);
-
 		}
 		else
 			ShowDefaultFrame(ptr);
@@ -249,12 +295,16 @@ void VCamFilter::ShowDefaultFrame(uint8_t *ptr)
 		static unsigned int y_offset = 0;
 		for (int y = 0; y < GetCY(); y++) {
 			cy = (y + y_offset) % GetCY();
+			int c = (255 * y) / GetCY();
+
 			for (int x = 0; x < GetCX(); x++) {
-				int c = (255 * y) / GetCY();
 				int* dst = (int*)&ptr[(cy * GetCX() + x) * 4];
 				*dst = (255 << 24) | (255 - c) << 16 | (c << 8) | (255 - c);
 			}
 		}
 		y_offset += 6;
+	}
+	else if (GetVideoFormat() == VideoFormat::YUY2) {
+		memset(ptr, 127, cx * cy * 2);
 	}
 }

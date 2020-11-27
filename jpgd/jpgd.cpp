@@ -1699,9 +1699,12 @@ namespace jpgd {
 			int gc = ((m_crg[cr] + m_cbg[cb]) >> 16);
 			int bc = m_cbb[cb];
 
-			d0[0] = clamp(y + rc);
+			//d0[0] = clamp(y + rc);
+			//d0[1] = clamp(y + gc);
+			//d0[2] = clamp(y + bc);
+			d0[0] = clamp(y + bc); //FIXME how to check if it needs RGBX or BGRX?
 			d0[1] = clamp(y + gc);
-			d0[2] = clamp(y + bc);
+			d0[2] = clamp(y + rc);
 			d0[3] = 255;
 
 			d0 += 4;

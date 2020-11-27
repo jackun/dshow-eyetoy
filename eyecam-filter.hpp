@@ -15,7 +15,7 @@
 class VCamFilter : public DShow::OutputFilter {
 	std::thread th, waiter;
 
-	const uint8_t *placeholder;
+	const uint8_t* placeholder;
 	uint32_t cx = DEFAULT_CX;
 	uint32_t cy = DEFAULT_CY;
 	uint64_t interval = DEFAULT_INTERVAL;
@@ -23,7 +23,7 @@ class VCamFilter : public DShow::OutputFilter {
 	HANDLE thread_stop;
 
 	std::vector<uint8_t> last_image;
-	user_data user_data;
+	user_data user_data{};
 	libusb_context* usb_ctx = nullptr;
 	libusb_device_handle* usb_handle = nullptr;
 	std::mutex hotplug_mutex;
@@ -37,12 +37,12 @@ class VCamFilter : public DShow::OutputFilter {
 
 	void Thread();
 	void Frame(uint64_t ts);
-	void ShowDefaultFrame(uint8_t *ptr);
+	void ShowDefaultFrame(uint8_t* ptr);
 	void ImageReady(gspca_device* user);
 	void WaitForDevice();
 
 protected:
-	const wchar_t *FilterName() const override;
+	const wchar_t* FilterName() const override;
 
 public:
 	VCamFilter();
